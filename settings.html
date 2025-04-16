@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>إدارة الأفلام</title>
+  <link href="style.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/vue@2.6.14"></script>
+</head>
+<body>
+  <div id="settingsApp" v-cloak>
+    <!-- Password Prompt Modal -->
+    <div class="modal" v-if="showPasswordPrompt">
+      <div class="modal-content delete-confirm">
+        <h2>تأكيد كلمة المرور</h2>
+        <div style="margin: 20px 0;">
+          <input type="password" v-model="password" placeholder="أدخل كلمة المرور" @keyup.enter="verifyPassword" class="password-input">
+        </div>
+        <div class="modal-buttons">
+          <button @click="verifyPassword" class="button-feature">تأكيد</button>
+          <button @click="closeWindow" class="cancel">إغلاق</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Delete Confirm Modal -->
+    <div class="modal" v-if="showDeleteConfirm">
+      <div class="modal-content delete-confirm">
+        <h2>تأكيد الحذف</h2>
+        <p v-if="deleteTarget === 'all'">
+          هل أنت متأكد من حذف جميع الأفلام من الموقع؟
+        </p>
+        <p v-else>
+          هل أنت متأكد من حذف جميع الأفلام من قسم "{{ categories.find(c => c.id === deleteTarget).name }}"؟
+        </p>
+        <div class="modal-buttons">
+          <button @click="confirmBulkDelete" class="button-delete">نعم، احذف</button>
+          <button @click="showDeleteConfirm = false" class="cancel">إلغاء</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings Content -->
+    <div class="settings-container" v-if="isAuthenticated">
+      <div class="settings-header">
+        <h2>إعدادات الموقع</h2>
+        <div>
+          <button @click="importMoviesFromFile" class="settings-action-btn">
+            <i class="fas fa-file-import"></i> استيراد قاعدة بيانات
+          </button>
+          <button @click="saveMovies" class="settings-action-btn">
+            <i class="fas fa-download"></i> تصدير قاعدة بيانات
+          </button>
+          <button @click="closeWindow" class="cancel">عودة للرئيسية</button>
+          <button @click="bulkDeleteMovies('all')" class="settings-action-btn danger">
+            <i class="fas fa-trash-alt"></i> حذف جميع الأفلام
+          </button>
+        </div>
+      </div>
+      
+      <h3>إضافة أفلام</h3>
+      <div>
+        <div class="bulk-input-controls">
+          <button @click="toggleBulkAdd" class="bulk-toggle">
+            {{ isBulkAdd ? 'إضافة فيلم واحد' : 'إضافة عدة أفلام' }}
+          </button>
+          <button @click="toggleJsonParser" class="bulk-toggle" v-if="isBulkAdd">
+            {{ showJsonParser ? 'إخفاء محلل JSON' : 'محلل JSON' }}
+          </button>
+          <label class="settings-action-btn" v-if="isBulkAdd">
+            <i class="fas fa-file-upload"></i>
+            استيراد من ملف JSON
+            <input 
+              type="file" 
+              accept=".json"
+              style="display: none;"
+              @change="parseJsonFile"
+            >
+          </label>
+        </div>
+
+        <!-- JSON Parser -->
+        <div v-if="showJsonParser && isBulkAdd" class="json-parser">
+          <h3>محلل JSON</h3>
+          <textarea 
+            v-model="jsonInput" 
+            class="json-input" 
+            placeholder="ضع نص JSON هنا..."
+          ></textarea>
+          <button @click="parseJson">تحليل البيانات</button>
+          
+          <div v-if="parsedData.titles" class="parsed-output">
+            <div class="parsed-field">
+              <h4>أسماء الأفلام</h4>
+              <div class="parsed-content">{{ parsedData.titles }}</div>
+            </div>
+            <div class="parsed-field">
+              <h4>روابط الصور</h4>
+              <div class="parsed-content">{{ parsedData.images }}</div>
+            </div>
+            <div class="parsed-field">
+              <h4>روابط الأفلام</h4>
+              <div class="parsed-content">{{ parsedData.mainLinks }}</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Single Movie Input -->
+        <div v-if="!isBulkAdd">
+          <input type="text" v-model="newMovie.title" placeholder="عنوان الفيلم">
+          <input type="text" v-model="newMovie.image" placeholder="رابط صورة الفيلم">
+          <input type="text" v-model="newMovie.mainLink" placeholder="رابط الفيلم الرئيسي">
+          <input type="text" v-model="newMovie.alternativeLink" placeholder="رابط بديل (اختياري)">
+        </div>
+
+        <!-- Bulk Movie Input -->
+        <div v-else class="bulk-inputs">
+          <textarea
+            v-model="bulkMovies.titles"
+            placeholder="أسماء الأفلام (فيلم واحد في كل سطر)"
+            rows="5"
+            class="bulk-textarea"
+          ></textarea>
+          <textarea
+            v-model="bulkMovies.images"
+            placeholder="روابط صور الأفلام (رابط واحد في كل سطر)"
+            rows="5"
+            class="bulk-textarea"
+          ></textarea>
+          <textarea
+            v-model="bulkMovies.mainLinks"
+            placeholder="روابط الأفلام الرئيسية (رابط واحد في كل سطر)"
+            rows="5"
+            class="bulk-textarea"
+          ></textarea>
+          <textarea
+            v-model="bulkMovies.alternativeLinks"
+            placeholder="روابط بديلة (اختياري - رابط واحد في كل سطر)"
+            rows="5"
+            class="bulk-textarea"
+          ></textarea>
+        </div>
+
+        <select v-model="newMovie.category" class="category-select">
+          <option value="arabicNew">أفلام عربية جديدة</option>
+          <option value="arabicOld">أفلام عربية قديمة</option>
+          <option value="foreign">أفلام أجنبية</option>
+          <option value="rMovies">أفلام R</option>
+          <option value="sMovies">أفلام S</option>
+          <option value="rsSelected">المختارة R + S</option>
+          <option value="horror">أفلام الرعب</option>
+          <option value="series">المسلسلات</option>
+          <option value="movieSeries">سلاسل الأفلام</option>
+        </select>
+        
+        <div class="modal-buttons">
+          <button @click="isBulkAdd ? addBulkMovies() : addMovie()">
+            {{ isBulkAdd ? 'إضافة الأفلام' : 'إضافة فيلم' }}
+          </button>
+        </div>
+      </div>
+
+      <div class="settings-movies">
+        <h3>إدارة الأفلام ({{ movies.length }})</h3>
+        
+        <div class="management-tabs">
+          <button @click="managementMode = 'category'" :class="{ active: managementMode === 'category' }">حسب الأقسام</button>
+          <button @click="managementMode = 'domain'" :class="{ active: managementMode === 'domain' }">حسب الموقع المصدر</button>
+        </div>
+        
+        <!-- Category Management Section -->
+        <div v-if="managementMode === 'category'">
+          <select v-model="settingsCategory" class="settings-category-select">
+            <option v-for="category in categories.filter(c => c.id !== 'all')" 
+                    :key="category.id" 
+                    :value="category.id">
+              {{ category.name }}
+            </option>
+          </select>
+
+          <div class="settings-category-content">
+            <div class="settings-category-header">
+              <h4>{{ categories.find(c => c.id === settingsCategory).name }}</h4>
+              <span class="settings-category-count">
+                {{ selectedCategoryMovies.length }} فيلم
+              </span>
+              <div class="settings-category-actions">
+                <button v-if="settingsCategory === 'rMovies' || settingsCategory === 'sMovies' || settingsCategory === 'rsSelected'" 
+                        @click="toggleCategoryVisibility(settingsCategory)" 
+                        class="settings-action-btn" 
+                        :class="{'hidden-category': categories.find(c => c.id === settingsCategory).hidden}">
+                  <i class="fas" :class="categories.find(c => c.id === settingsCategory).hidden ? 'fa-eye' : 'fa-eye-slash'"></i>
+                  {{ categories.find(c => c.id === settingsCategory).hidden ? 'إظهار القسم' : 'إخفاء القسم' }}
+                </button>
+                <button @click="bulkExportCategory(settingsCategory)" class="settings-action-btn">
+                  <i class="fas fa-download"></i> تصدير القسم
+                </button>
+                <button @click="bulkDeleteMovies(settingsCategory)" class="settings-action-btn danger">
+                  <i class="fas fa-trash-alt"></i> حذف القسم
+                </button>
+              </div>
+            </div>
+
+            <div class="category-sort-options">
+              <label>ترتيب الأفلام حسب الموقع:</label>
+              <select v-model="selectedSortSite" class="sort-select" @change="sortCategoryByDomain">
+                <option value="">بدون ترتيب</option>
+                <option v-for="domain in getDomainsByCategory(settingsCategory)" 
+                        :key="domain" 
+                        :value="domain">
+                  {{ domain }}
+                </option>
+              </select>
+              <div v-if="selectedSortSite" class="sort-actions">
+                <button @click="moveSiteToTop(selectedSortSite, settingsCategory)" class="settings-action-btn">
+                  <i class="fas fa-arrow-up"></i> نقل للأعلى
+                </button>
+                <button @click="moveSiteToBottom(selectedSortSite, settingsCategory)" class="settings-action-btn">
+                  <i class="fas fa-arrow-down"></i> نقل للأسفل
+                </button>
+              </div>
+            </div>
+
+            <div v-for="movie in selectedCategoryMovies" 
+                 :key="movie.id" 
+                 class="settings-movie-item" 
+                 :class="{ 'movie-hidden': movie.hidden }">
+              <span class="settings-movie-title">{{ movie.title }}</span>
+              <div>
+                <div class="settings-movie-actions">
+                  <button @click="toggleMovieVisibility(movie)" class="button-hide">
+                    {{ movie.hidden ? 'إظهار' : 'إخفاء' }}
+                  </button>
+                  <button @click="toggleMovieFeature(movie)" class="button-feature" :class="{ 'featured': movie.featured }">
+                    {{ movie.featured ? 'إلغاء التمييز' : 'تمييز' }}
+                  </button>
+                  <button @click="deleteMovie(movie.id)" class="button-delete">حذف</button>
+                  <button @click="watchMovie(movie)" class="btn btn--btn2-p2">
+                    <i class="fas fa-play"></i>
+                  </button>
+                </div>
+                <div class="movie-move-controls">
+                  <select v-model="movie.targetCategory" class="move-category-select">
+                    <option v-for="category in categories.filter(c => c.id !== 'all' && c.id !== 'featured' && c.id !== movie.category)" 
+                            :key="category.id" 
+                            :value="category.id">
+                      {{ category.name }}
+                    </option>
+                  </select>
+                  <button @click="moveMovie(movie)" class="move-button">نقل</button>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="selectedCategoryMovies.length === 0" 
+                 style="text-align: center; padding: 1rem; color: #666;">
+              لا توجد أفلام في هذا القسم
+            </div>
+          </div>
+        </div>
+        
+        <!-- Domain Management Section -->
+        <div v-if="managementMode === 'domain'">
+          <select v-model="selectedDomain" class="settings-category-select">
+            <option v-for="domain in domains" 
+                    :key="domain" 
+                    :value="domain">
+              {{ domain }} ({{ getMoviesByDomain(domain).length }})
+            </option>
+          </select>
+          
+          <div class="settings-category-content">
+            <div class="settings-category-header">
+              <h4>أفلام من {{ selectedDomain }}</h4>
+              <span class="settings-category-count">
+                {{ getMoviesByDomain(selectedDomain).length }} فيلم
+              </span>
+              <div class="settings-category-actions">
+                <button @click="toggleDomainVisibility(selectedDomain)" class="settings-action-btn">
+                  <i class="fas" :class="isDomainHidden(selectedDomain) ? 'fa-eye' : 'fa-eye-slash'"></i>
+                  {{ isDomainHidden(selectedDomain) ? 'إظهار الأفلام' : 'إخفاء الأفلام' }}
+                </button>
+                <button @click="bulkExportDomain(selectedDomain)" class="settings-action-btn">
+                  <i class="fas fa-download"></i> تصدير أفلام الموقع
+                </button>
+                <button @click="bulkDeleteDomain(selectedDomain)" class="settings-action-btn danger">
+                  <i class="fas fa-trash-alt"></i> حذف أفلام الموقع
+                </button>
+              </div>
+            </div>
+
+            <div v-for="movie in getMoviesByDomain(selectedDomain)" 
+                 :key="movie.id" 
+                 class="settings-movie-item" 
+                 :class="{ 'movie-hidden': movie.hidden }">
+              <span class="settings-movie-title">{{ movie.title }}</span>
+              <div>
+                <div class="settings-movie-actions">
+                  <button @click="toggleMovieVisibility(movie)" class="button-hide">
+                    {{ movie.hidden ? 'إظهار' : 'إخفاء' }}
+                  </button>
+                  <button @click="toggleMovieFeature(movie)" class="button-feature" :class="{ 'featured': movie.featured }">
+                    {{ movie.featured ? 'إلغاء التمييز' : 'تمييز' }}
+                  </button>
+                  <button @click="deleteMovie(movie.id)" class="button-delete">حذف</button>
+                  <button @click="watchMovie(movie)" class="btn btn--btn2-p2">
+                    <i class="fas fa-play"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="getMoviesByDomain(selectedDomain).length === 0" 
+                 style="text-align: center; padding: 1rem; color: #666;">
+              لا توجد أفلام من هذا الموقع
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="settings.js"></script>
+</body>
+</html>

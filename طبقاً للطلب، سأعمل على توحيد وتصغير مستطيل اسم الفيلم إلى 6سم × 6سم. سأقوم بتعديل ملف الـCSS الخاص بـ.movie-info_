@@ -1,0 +1,14 @@
+.movie-info {
+  padding: 0.5rem;
+  width: 6cm;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.movie-info h3 {
+  min-height: 6cm;
+  max-height: 6cm;
+}

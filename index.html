@@ -1,0 +1,400 @@
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, minimal-ui">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="format-detection" content="telephone=no">
+  <title>كوكتيل أفلام متنوعة</title>
+  <link href="style.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/vue@2.6.14"></script>
+  <script src="https://cdn.jsdelivr.net/npm/fastclick@1.0.6/lib/fastclick.min.js"></script>
+  <script type="importmap">
+    {
+      "imports": {
+        "./search-handler.js": "./search-handler.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="app" v-cloak>
+    <!-- Delete Confirm Modal -->
+    <div class="modal" v-if="showDeleteConfirm">
+      <div class="modal-content delete-confirm">
+        <h2>تأكيد الحذف</h2>
+        <p v-if="deleteTarget === 'all'">
+          هل أنت متأكد من حذف جميع الأفلام من الموقع؟
+        </p>
+        <p v-else>
+          هل أنت متأكد من حذف جميع الأفلام من قسم "{{ categories.find(c => c.id === deleteTarget).name }}"؟
+        </p>
+        <div class="modal-buttons">
+          <button @click="confirmBulkDelete" class="button-delete">نعم، احذف</button>
+          <button @click="showDeleteConfirm = false" class="cancel">إلغاء</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Password Prompt Modal -->
+    <div class="modal" v-if="showPasswordPrompt">
+      <div class="modal-content delete-confirm">
+        <h2>تأكيد كلمة المرور</h2>
+        <div style="margin: 20px 0;">
+          <input type="password" v-model="password" placeholder="أدخل كلمة المرور" @keyup.enter="verifyPassword" class="password-input">
+        </div>
+        <div class="modal-buttons">
+          <button @click="verifyPassword" class="button-feature">تأكيد</button>
+          <button @click="showPasswordPrompt = false" class="cancel">إلغاء</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div class="modal" v-if="showSettings">
+      <div class="modal-content">
+        <div class="settings-header">
+          <h2>إعدادات الموقع</h2>
+          <div>
+            <button @click="importMoviesFromFile" class="settings-action-btn">
+              <i class="fas fa-file-import"></i> استيراد قاعدة بيانات
+            </button>
+            <button @click="saveMovies" class="settings-action-btn">
+              <i class="fas fa-download"></i> تصدير قاعدة بيانات
+            </button>
+            <button @click="closeSettings" class="cancel">عودة</button>
+            <button @click="bulkDeleteMovies('all')" class="settings-action-btn danger">
+              <i class="fas fa-trash-alt"></i> حذف جميع الأفلام
+            </button>
+          </div>
+        </div>
+        
+        <h3>إضافة أفلام</h3>
+        <div>
+          <div class="bulk-input-controls">
+            <button @click="toggleBulkAdd" class="bulk-toggle">
+              {{ isBulkAdd ? 'إضافة فيلم واحد' : 'إضافة عدة أفلام' }}
+            </button>
+            <button @click="toggleJsonParser" class="bulk-toggle" v-if="isBulkAdd">
+              {{ showJsonParser ? 'إخفاء محلل JSON' : 'محلل JSON' }}
+            </button>
+            <label class="settings-action-btn" v-if="isBulkAdd">
+              <i class="fas fa-file-upload"></i>
+              استيراد من ملف JSON
+              <input 
+                type="file" 
+                accept=".json"
+                style="display: none;"
+                @change="parseJsonFile"
+              >
+            </label>
+          </div>
+
+          <!-- JSON Parser -->
+          <div v-if="showJsonParser && isBulkAdd" class="json-parser">
+            <h3>محلل JSON</h3>
+            <textarea 
+              v-model="jsonInput" 
+              class="json-input" 
+              placeholder="ضع نص JSON هنا..."
+            ></textarea>
+            <button @click="parseJson">تحليل البيانات</button>
+            
+            <div v-if="parsedData.titles" class="parsed-output">
+              <div class="parsed-field">
+                <h4>أسماء الأفلام</h4>
+                <div class="parsed-content">{{ parsedData.titles }}</div>
+              </div>
+              <div class="parsed-field">
+                <h4>روابط الصور</h4>
+                <div class="parsed-content">{{ parsedData.images }}</div>
+              </div>
+              <div class="parsed-field">
+                <h4>روابط الأفلام</h4>
+                <div class="parsed-content">{{ parsedData.mainLinks }}</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Single Movie Input -->
+          <div v-if="!isBulkAdd">
+            <input type="text" v-model="newMovie.title" placeholder="عنوان الفيلم">
+            <input type="text" v-model="newMovie.image" placeholder="رابط صورة الفيلم">
+            <input type="text" v-model="newMovie.mainLink" placeholder="رابط الفيلم الرئيسي">
+            <input type="text" v-model="newMovie.alternativeLink" placeholder="رابط بديل (اختياري)">
+          </div>
+
+          <!-- Bulk Movie Input -->
+          <div v-else class="bulk-inputs">
+            <textarea
+              v-model="bulkMovies.titles"
+              placeholder="أسماء الأفلام (فيلم واحد في كل سطر)"
+              rows="5"
+              class="bulk-textarea"
+            ></textarea>
+            <textarea
+              v-model="bulkMovies.images"
+              placeholder="روابط صور الأفلام (رابط واحد في كل سطر)"
+              rows="5"
+              class="bulk-textarea"
+            ></textarea>
+            <textarea
+              v-model="bulkMovies.mainLinks"
+              placeholder="روابط الأفلام الرئيسية (رابط واحد في كل سطر)"
+              rows="5"
+              class="bulk-textarea"
+            ></textarea>
+            <textarea
+              v-model="bulkMovies.alternativeLinks"
+              placeholder="روابط بديلة (اختياري - رابط واحد في كل سطر)"
+              rows="5"
+              class="bulk-textarea"
+            ></textarea>
+          </div>
+
+          <select v-model="newMovie.category" class="category-select">
+            <option value="arabicNew">أفلام عربية جديدة</option>
+            <option value="arabicOld">أفلام عربية قديمة</option>
+            <option value="foreign">أفلام أجنبية</option>
+            <option value="rMovies">أفلام R</option>
+            <option value="sMovies">أفلام S</option>
+            <option value="rsSelected">المختارة R + S</option>
+            <option value="horror">أفلام الرعب</option>
+            <option value="series">المسلسلات</option>
+            <option value="movieSeries">سلاسل الأفلام</option>
+          </select>
+          
+          <div class="modal-buttons">
+            <button @click="isBulkAdd ? addBulkMovies() : addMovie()">
+              {{ isBulkAdd ? 'إضافة الأفلام' : 'إضافة فيلم' }}
+            </button>
+            <button @click="closeSettings" class="cancel">إغلاق</button>
+          </div>
+        </div>
+
+        <div class="settings-movies">
+          <h3>إدارة الأفلام ({{ movies.length }})</h3>
+          
+          <select v-model="settingsCategory" class="settings-category-select">
+            <option v-for="category in categories.filter(c => c.id !== 'all')" 
+                    :key="category.id" 
+                    :value="category.id">
+              {{ category.name }}
+            </option>
+          </select>
+
+          <div class="settings-category-content">
+            <div class="settings-category-header">
+              <h4>{{ categories.find(c => c.id === settingsCategory).name }}</h4>
+              <span class="settings-category-count">
+                {{ selectedCategoryMovies.length }} فيلم
+              </span>
+              <div class="settings-category-actions">
+                <button @click="bulkExportCategory(settingsCategory)" class="settings-action-btn">
+                  <i class="fas fa-download"></i> تصدير القسم
+                </button>
+                <button @click="bulkDeleteMovies(settingsCategory)" class="settings-action-btn danger">
+                  <i class="fas fa-trash-alt"></i> حذف القسم
+                </button>
+              </div>
+            </div>
+
+            <div v-for="movie in selectedCategoryMovies" 
+                 :key="movie.id" 
+                 class="settings-movie-item" 
+                 :class="{ 'movie-hidden': movie.hidden }">
+              <span class="settings-movie-title">{{ movie.title }}</span>
+              <div class="settings-movie-actions">
+                <button @click="toggleMovieVisibility(movie)" class="button-hide">
+                  {{ movie.hidden ? 'إظهار' : 'إخفاء' }}
+                </button>
+                <button @click="toggleMovieFeature(movie)" class="button-feature" :class="{ 'featured': movie.featured }">
+                  {{ movie.featured ? 'إلغاء التمييز' : 'تمييز' }}
+                </button>
+                <button @click="deleteMovie(movie.id)" class="button-delete">حذف</button>
+                <button @click="watchMovie(movie)" class="btn btn--btn2-p2">
+                  <i class="fas fa-play"></i>
+                </button>
+              </div>
+            </div>
+
+            <div v-if="selectedCategoryMovies.length === 0" 
+                 style="text-align: center; padding: 1rem; color: #666;">
+              لا توجد أفلام في هذا القسم
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <header>
+      <nav>
+        <ul>
+          <li><a href="https://example.com" class="active">الرئيسية</a></li>
+          <li><a href="https://example.com/series">المسلسلات</a></li>
+          <li><a href="https://example.com/movies">الأفلام</a></li>
+          <li><a href="https://example.com/contact">تواصل معنا</a></li>
+          <li><a href="#" @click.prevent="openSettings">الإعدادات</a></li>
+        </ul>
+      </nav>
+      <div class="search-container">
+        <input 
+          type="text" 
+          v-model="searchQuery" 
+          @input="searchMovies" 
+          placeholder="ابحث عن الأفلام..." 
+          class="search-input"
+        >
+        <div class="search-results" v-if="searchResults.length > 0">
+          <div 
+            v-for="movie in searchResults" 
+            :key="movie.id" 
+            @click="selectSearchResult(movie)"
+            class="search-result-item"
+          >
+            <div class="search-result-image">
+              <img :src="movie.image" :alt="movie.title">
+            </div>
+            <div class="search-result-info">
+              {{ movie.title }} ({{ categories.find(c => c.id === movie.category)?.name }})
+              <div class="sel-action">
+                <button @click="watchMovie(movie)" class="bt--result">
+                  <i class="fs play"></i>
+                </button>
+                <button @click="toggleMovieFeature(movie)" 
+                  class="eature-rbut" :class="{ 'featured': movie.featured }">
+                  <i class="fas" :class="movie.featured ? 'fa-star' : 'fa-star-o'"></i>
+                </button>
+                <button @click="deleteMovie(movie.id)" class="bresult del">
+                  <i class="fas fa-trash-alt"></i>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <h1>كوكتيل أفلام متنوعة</h1>
+        <p>شاهد أحدث الأفلام والمسلسلات العربية والعالمية</p>
+      </section>
+
+      <nav class="category-nav">
+        <ul>
+          <li v-for="category in orderedCategories" :key="category.id">
+            <button @click="selectedCategory = category.id" :class="{ active: selectedCategory === category.id }">
+              {{ category.name }}
+              <span class="category-count">{{ movies.filter(m => m.category === category.id).length }}</span>
+            </button>
+          </li>
+        </ul>
+      </nav>
+
+      <section class="search-results-section" v-if="isSearchActive">
+        <h2>نتائج البحث عن "{{ searchQuery }}"</h2>
+        <div class="pagination-info" v-if="visibleMovies.length > moviesPerPage">
+          عرض {{ ((currentPage-1) * moviesPerPage) + 1 }} إلى {{ Math.min(currentPage * moviesPerPage, visibleMovies.length) }} من إجمالي {{ visibleMovies.length }} فيلم
+        </div>
+        <div class="movie-grid">
+          <div v-for="movie in displayedMovies" :key="movie.id" class="movie-card">
+            <div class="movie-image">
+              <img :src="movie.image" :alt="movie.title">
+              <div v-if="movie.alternativeLink" class="alt-link-icon">
+                <i class="fas fa-link"></i>
+              </div>
+            </div>
+            <div class="movie-info">
+              <h3>{{ movie.title }}</h3>
+              <p>{{ movie.year }}</p>
+            </div>
+            <div class="movie-actions">
+              <button @click="watchMovie(movie)" class="btn--watch">
+                <i class="fas fa-play fa-2x"></i> 
+              </button>
+              <button @click="toggleMovieFeature(movie)" class="buttons feature--movie" :class="{ 'featured': movie.featured }">
+                <i class="fas" :class="movie.featured ? 'fa-star' : 'fa-star-o'"></i>
+              </button>
+              <button @click="deleteMovie(movie.id)" class="buttons delete--movie">
+                <i class="fas fa-trash-alt"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+        <div v-if="getTotalPages() > 1" class="pagination-controls">
+          <button @click="prevPage" :disabled="currentPage === 1">السابق</button>
+          <button 
+            v-for="page in getPageRange()" 
+            :key="page" 
+            @click="page === '...' ? null : goToPage(page)" 
+            :class="{ active: page === currentPage, ellipsis: page === '...' }"
+            :disabled="page === '...'"
+          >
+            {{ page }}
+          </button>
+          <button @click="nextPage" :disabled="currentPage === getTotalPages()">التالي</button>
+        </div>
+      </section>
+      <section class="movies" v-if="!isSearchActive">
+        <h2>{{ 
+          selectedCategory === 'series' ? 'المسلسلات' : 
+          selectedCategory === 'movieSeries' ? 'سلاسل الأفلام' :
+          'الأفلام' 
+        }}</h2>
+        
+        <div class="pagination-info" v-if="visibleMovies.length > moviesPerPage">
+          عرض {{ ((currentPage-1) * moviesPerPage) + 1 }} إلى {{ Math.min(currentPage * moviesPerPage, visibleMovies.length) }} من إجمالي {{ visibleMovies.length }} فيلم
+        </div>
+        
+        <div class="movie-grid">
+          <div v-for="movie in displayedMovies" :key="movie.id" class="movie-card">
+            <div class="movie-image">
+              <img :src="movie.image" :alt="movie.title">
+              <div v-if="movie.alternativeLink" class="alt-link-icon">
+                <i class="fas fa-link"></i>
+              </div>
+            </div>
+            <div class="movie-info">
+              <h3>{{ movie.title }}</h3>
+              <p>{{ movie.year }}</p>
+            </div>
+            <div class="movie-actions">
+              <button @click="watchMovie(movie)" class="btn--watch">
+                <i class="fas fa-play fa-2x"></i> 
+              </button>
+              <button @click="toggleMovieFeature(movie)" class="buttons feature--movie" :class="{ 'featured': movie.featured }">
+                <i class="fas" :class="movie.featured ? 'fa-star' : 'fa-star-o'"></i>
+              </button>
+              <button @click="deleteMovie(movie.id)" class="buttons delete--movie">
+                <i class="fas fa-trash-alt"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+        
+        <div v-if="getTotalPages() > 1" class="pagination-controls">
+          <button @click="prevPage" :disabled="currentPage === 1">السابق</button>
+          <button 
+            v-for="page in getPageRange()" 
+            :key="page" 
+            @click="page === '...' ? null : goToPage(page)" 
+            :class="{ active: page === currentPage, ellipsis: page === '...' }"
+            :disabled="page === '...'"
+          >
+            {{ page }}
+          </button>
+          <button @click="nextPage" :disabled="currentPage === getTotalPages()">التالي</button>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <p>جميع الحقوق محفوظة 2024</p>
+    </footer>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
